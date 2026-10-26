@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# gs-cli: Convinience script to install GemsStone/S 64 Bit and provide a CLI for managing
+# the installed stone. This script only targets Linux x86_64 architecture.
+# (c) Ralph Mauersberger
+
+# The product ships with different options for your empty repository starting point; change if appropriate.
+export GSCLI_GOLDEN_COPY_EXTENT_NAME=extent0.seaside.dbf
+
+# determine the script location, follow symlinks, do it the portable way, store it in GSCLI_HOME
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+export GSCLI_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+ProgName=$(basename $0)
+
+#----------------------------------------------------------------------------------------
+sub_help(){
+    echo "Usage: $ProgName <subcommand> [options]"
+    echo "Subcommands:"
+    echo "    bash                   Run a bash shell with exported environemnt"
+    echo "    backup                 Make a full backup"
+    echo "    commitRestore          Run SystemRepository commitRestore"
+    echo "    gsStatistics           Print some basic Gemstone/S statistics"
+    echo "    mfc                    Run SystemRepository markForCollection"
+    echo "    reclaimAll             Run SystemRepository reclaimAll"
+    echo "    restoreBackup <file>   Restore from a given full backup file"
+    echo "    revertToGoldenCopy     Drop your Image and revert to golden extent copy"
+    echo "    script <.gs-file>      Execute the given Topaz-Script"
+    echo "    showBackups            List all available backup files"
+    echo "    start                  Start GemStone/S"
+    echo "    status                 Status of GemStone/S"
+    echo "    stop                   Stop GemStone/S"
+    echo "    topaz                  Start a linked topaz session"
+    echo ""
+    echo ""
+}
+
+#----------------------------------------------------------------------------------------
+check_requirements() {
+    local missing=()
+
+    for cmd in realpath wget unzip; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    done
+
+    if ((${#missing[@]})); then
+	    echo "ERROR: $ProgName requires the following missing command(s):" >&2
+        printf '  - %s\n' "${missing[@]}" >&2
+        echo "Please install the missing dependencies and run the script again." >&2
+        exit 1
+    fi
+}
+
+#----------------------------------------------------------------------------------------
+check_already_setup() {
+    for dir in $GSCLI_HOME/conf $GSCLI_HOME/fullBackups $GSCLI_HOME/var $GSCLI_HOME/gemstone; do
+        [ -d "$dir" ] && break
+    done || setupEnvironment
+}
+
+#----------------------------------------------------------------------------------------
+setupEnvironment() {
+    echo "We are in $GSCLI_HOME. No previous installation found in this directory."
+    echo "We are going to install a fresh $ProgName-based GemStone/S 64 Bit environment."
+    read -r -p "Do you want to continue? [y/N] " answer
+    [[ $answer =~ ^[Yy]$ ]] || exit 1
+
+    echo "Setting up the file system..."
+    mkdir -p conf fullBackups gemstone/locks var/extent/ var/log/ var/tranlog var/log/gemstone
+    
+    echo "Okay, we are going to download the product..."
+    while true; do
+	    echo "Please select the desired GemStone/S Version:"
+        read -e -i "3.7.6" -p "> " GEMSTONE_VERSION
+        DOWNLOAD_URL="https://downloads.gemtalksystems.com/pub/GemStone64/${GEMSTONE_VERSION}/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+
+        echo "Downloading ${DOWNLOAD_URL} ..."
+
+        if wget --spider -q "$DOWNLOAD_URL"; then
+            wget -P gemstone "$DOWNLOAD_URL"
+            break
+        else
+            echo
+            echo "ERROR: Could not find desired version."
+            echo "See https://downloads.gemtalksystems.com/pub/GemStone64/ for available options."
+            echo
+        fi
+    done
+
+    echo "Unzippig the downloaded product..."
+    unzip gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip -d gemstone && rm gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip
+
+    echo "Creating product-symlink to downloaded version..."
+    ln -s "GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux" gemstone/product
+
+    echo "Copy files..."
+    cp gemstone/product/bin/$GSCLI_GOLDEN_COPY_EXTENT_NAME var/extent
+    chmod +w var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME
+    cp gemstone/product/data/system.conf conf
+    cp gemstone/product/sys/community.starter.key conf/gemstone.key
+
+    echo "How should your stone be named?"
+    read -e -i "gs64stone" -p "> " GEMSTONE_NAME
+    echo "Which port should netldi use?"
+    read -e -i "50377" -p "> " NETLDI_PORT
+
+    cat > conf/gs-env << EOF
+GSCLI_NETLDI_PORT=$NETLDI_PORT
+
+# for GsApplicationTools
+GEMSTONE_NAME=$GEMSTONE_NAME
+GEMSTONE_LOGDIR=\${GSCLI_HOME}/var/log/gemstone
+GEMSTONE_STONE_SCRIPT_DIR=\${GSCLI_HOME}/bin
+
+GEMSTONE_EXE_CONF=\${GSCLI_HOME}/conf/\${GEMSTONE_NAME}.conf
+GEMSTONE_GLOBAL_DIR=\${GSCLI_HOME}/gemstone
+GEMSTONE=\${GEMSTONE_GLOBAL_DIR}/product
+EOF
+
+    cat > conf/gs.topazini << EOF
+! default initialization for Topaz session
+! output push /dev/null only
+set user DataCurator pass swordfish
+set gems $GEMSTONE_NAME
+login
+iferr 1 stack
+iferr 10 exit 1
+EOF
+
+cat > conf/$GEMSTONE_NAME.conf << EOF
+DBF_EXTENT_NAMES = \$GSCLI_HOME/var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME;
+STN_TRAN_LOG_DIRECTORIES = \$GSCLI_HOME/var/tranlog/;
+KEYFILE = \$GSCLI_HOME/conf/gemstone.key;
+SHR_PAGE_CACHE_SIZE_KB = 1GB;
+GEM_TEMPOBJ_CACHE_SIZE = 300000KB;
+STN_SYMBOL_GC_ENABLED = TRUE;
+STN_TRAN_FULL_LOGGING = FALSE;
+EOF
+
+cat > .gs-cli_gsStatistics.topaz << EOF
+printIt
+| repositoryFileSize repositoryUsedSize |
+repositoryFileSize := SystemRepository fileSize.
+repositoryUsedSize := repositoryFileSize - SystemRepository freeSpace.
+GsFile stdout
+        log: 'Basic GemStone/S 64 Bit Repository statistics:';
+        log: ('repositoryFileSize: ', (SystemRepository numToMByteString: repositoryFileSize));
+        log: ('repositoryUsedSize: ', (SystemRepository numToMByteString: repositoryUsedSize)).
+%
+EOF
+
+    echo "gs-cli has setup your new environment. Run gs-cli --help to get started."
+    exit 0
+}
+
+#----------------------------------------------------------------------------------------
+requireRunningGs(){
+   $GEMSTONE/bin/gslist -vlc > /dev/null 2>&1
+   if [ $? -ne 0 ]
+   then
+	   echo "GemStone/S is not running! Please start it first."
+	   exit 1
+   fi
+}
+
+#----------------------------------------------------------------------------------------
+requireStoppedGs(){
+   $GEMSTONE/bin/gslist -vlc > /dev/null 2>&1
+   if [ $? -eq 0 ]
+   then
+      echo "GemStone/S is running! Please stop it first."
+      exit 1
+   fi
+}
+
+#----------------------------------------------------------------------------------------
+revertToGoldenExtentCopy(){
+   local goldenExtent=$1
+   echo "Remove the old Database Extent"
+   $GEMSTONE/bin/removedbf $GSCLI_HOME/var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME > /dev/null 2>&1
+
+   echo "Copy Empty Gemstone DB"
+   cp $goldenExtent $GSCLI_HOME/var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME
+   chmod 644 $GSCLI_HOME/var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME
+}
+
+#----------------------------------------------------------------------------------------
+sub_bash(){
+   export PATH="$GEMSTONE/bin:$PATH"
+   exec bash -i 0<>/dev/tty 1>/dev/tty 2>/dev/tty
+}
+
+#----------------------------------------------------------------------------------------
+sub_backup(){
+requireRunningGs
+TS=`date +%Y-%m-%d_%H:%M:%S`
+BACKUP_FILE=$GSCLI_HOME/fullBackups/fullBackup_${TS}
+$GEMSTONE/bin/topaz -l -I $GSCLI_HOME/conf/gs.topazini -q <<EOF
+exec SystemRepository fullBackupGzCompressedTo: '$BACKUP_FILE' %
+EOF
+}
+
+#----------------------------------------------------------------------------------------
+sub_commitRestore(){
+requireRunningGs
+$GEMSTONE/bin/topaz -l -I $GSCLI_HOME/conf/gs.topazini -q <<EOF
+exec SystemRepository commitRestore %
+EOF
+}
+
+#----------------------------------------------------------------------------------------
+sub_gsStatistics(){
+requireRunningGs
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini -qS $GSCLI_HOME/.gs-cli_gsStatistics.topaz < /dev/null
+}
+
+#----------------------------------------------------------------------------------------
+sub_mfc(){
+requireRunningGs
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini -q <<EOF
+exec SystemRepository markForCollection %
+EOF
+}
+
+#----------------------------------------------------------------------------------------
+sub_reclaimAll(){
+requireRunningGs
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini -q <<EOF
+exec SystemRepository reclaimAll %
+EOF
+}
+
+#----------------------------------------------------------------------------------------
+sub_restoreBackup(){
+if [ A$1 = A ]
+then
+   echo "ERROR: Filename needed"
+   exit 1
+fi
+BACKUP_FILE=`realpath $1`
+if [ ! -f $BACKUP_FILE ]; then
+   echo "ERROR: Backup file does not exist: $BACKUP_FILE"
+   exit 1
+fi
+
+requireStoppedGs
+
+echo "Attempting to restore Backup: $BACKUP_FILE"
+
+revertToGoldenExtentCopy $GEMSTONE/bin/extent0.dbf
+
+echo "Start the empty Database"
+$GEMSTONE/bin/startnetldi -a $CURRENT_USER -g -l $GSCLI_HOME/var/log/gemstone/netldi.log -D $GSCLI_HOME/var/log/gemstone/ $GSCLI_NETLDI_PORT
+$GEMSTONE/bin/startstone -R $GEMSTONE_NAME -z $GSCLI_HOME/conf/system.conf -e $GSCLI_HOME/conf/$GEMSTONE_NAME.conf -l $GSCLI_HOME/var/log/gemstone/$GEMSTONE_NAME.log
+
+echo "Restore from full backup"
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini  << EOF
+run
+SystemRepository restoreFromBackup: '$BACKUP_FILE'
+%
+EOF
+
+echo "Restore done, showing gslist"
+$GEMSTONE/bin/gslist -vlc
+
+echo "Continue with $ProgName commitRestore"
+}
+
+#----------------------------------------------------------------------------------------
+sub_revertToGoldenCopy(){
+   requireStoppedGs
+   echo "ATTENTION: This will erase your current Database and revert the system to its initial empty image."
+   echo "Do you really want to continue? [y/N]"
+   read -r answer
+   [[ $answer =~ ^[Yy]$ ]] || exit 1
+   revertToGoldenExtentCopy $GEMSTONE/bin/$GSCLI_GOLDEN_COPY_EXTENT_NAME
+}
+
+#----------------------------------------------------------------------------------------
+sub_script(){
+requireRunningGs
+if [ A$1 = A ]
+then
+   echo "ERROR: Filename needed"
+   exit 1
+fi
+SCRIPT_FILE=`realpath $1`
+if [ ! -f $SCRIPT_FILE ]; then
+   echo "ERROR: Script file does not exist: $SCRIPT_FILE"
+   exit 1
+fi
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini < $SCRIPT_FILE
+}
+
+#----------------------------------------------------------------------------------------
+sub_showBackups(){
+ls -ltrh $GSCLI_HOME/fullBackups
+}
+
+#----------------------------------------------------------------------------------------
+sub_start(){
+$GEMSTONE/bin/startnetldi -a $CURRENT_USER -g -l $GSCLI_HOME/var/log/gemstone/netldi.log -D $GSCLI_HOME/var/log/gemstone/ $GSCLI_NETLDI_PORT
+$GEMSTONE/bin/startstone $GEMSTONE_NAME -z $GSCLI_HOME/conf/system.conf -e $GSCLI_HOME/conf/$GEMSTONE_NAME.conf -l $GSCLI_HOME/var/log/gemstone/$GEMSTONE_NAME.log
+}
+
+#----------------------------------------------------------------------------------------
+sub_status(){
+$GEMSTONE/bin/gslist -vlc
+}
+
+#----------------------------------------------------------------------------------------
+sub_stop(){
+$GEMSTONE/bin/stopstone -i $GEMSTONE_NAME DataCurator swordfish
+$GEMSTONE/bin/stopnetldi $GSCLI_NETLDI_PORT
+}
+
+#----------------------------------------------------------------------------------------
+sub_topaz(){
+$GEMSTONE/bin/topaz -l -z $GSCLI_HOME/conf/system.conf -I $GSCLI_HOME/conf/gs.topazini
+}
+
+#----------------------------------------------------------------------------------------
+check_requirements
+
+check_already_setup
+CURRENT_USER="$(id -un)"
+
+set -a
+. ${GSCLI_HOME}/conf/gs-env
+set +a
+
+subcommand=$1
+case $subcommand in
+    "")
+	    echo "Run '$ProgName --help' for a list of known subcommands."
+	    exit 1
+	;;
+    "-h" | "--help")
+        sub_help
+        ;;
+    *)
+        shift
+        sub_${subcommand} $@ 2> /dev/null
+        if [ $? = 127 ]; then
+            echo "Error: '$subcommand' is not a known subcommand." >&2
+            echo "       Run '$ProgName --help' for a list of known subcommands." >&2
+            exit 1
+        fi
+        ;;
+esac
