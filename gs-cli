@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gs-cli: Convinience script to install GemsStone/S 64 Bit and provide a CLI for managing
+# gs-cli: Convenience script to install GemsStone/S 64 Bit and provide a CLI for managing
 # the installed stone. This script only targets Linux x86_64 architecture.
 # (c) Ralph Mauersberger
 
@@ -21,7 +21,7 @@ ProgName=$(basename $0)
 sub_help(){
     echo "Usage: $ProgName <subcommand> [options]"
     echo "Subcommands:"
-    echo "    bash                   Run a bash shell with exported environemnt"
+    echo "    bash                   Run a bash shell with exported environment"
     echo "    backup                 Make a full backup"
     echo "    commitRestore          Run SystemRepository commitRestore"
     echo "    gsStatistics           Print some basic Gemstone/S statistics"
@@ -91,13 +91,13 @@ setupEnvironment() {
         fi
     done
 
-    echo "Unzippig the downloaded product..."
+    echo "Unzipping the downloaded product..."
     unzip gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip -d gemstone && rm gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip
 
     echo "Creating product-symlink to downloaded version..."
     ln -s "GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux" gemstone/product
 
-    echo "Copy files..."
+    echo "Copying files..."
     cp gemstone/product/bin/$GSCLI_GOLDEN_COPY_EXTENT_NAME var/extent
     chmod +w var/extent/$GSCLI_GOLDEN_COPY_EXTENT_NAME
     cp gemstone/product/data/system.conf conf
