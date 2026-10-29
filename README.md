@@ -50,7 +50,7 @@ The script will detect the empty directory and guide you through the configurati
 2. **Name your stone:** Provide a custom name or press `Enter` for the default `gs64stone`.
 3. **Set a NetLDI port:** Specify a port or press `Enter` for the default `50377`.
 
-Depending on your internet connection, the entire process from starting the installer to a running installation usually takes less than five minutes. Get your development environment ready (I use [Jade](https://github.com/jgfoster/Jade)), start your new environment with  ./gs-cli start  and have fun.
+Depending on your internet connection, the entire process from starting the installer to a running installation usually takes less than five minutes. Get your development environment ready (I use [Jade](https://github.com/jgfoster/Jade)), start your new environment with `./gs-cli start` and have fun.
 
 ## Directory Structure
 
