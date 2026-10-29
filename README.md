@@ -6,7 +6,7 @@ Originally created for personal use, this tool is now open-source and shared und
 
 ## Why gs-cli?
 
-GemStone/S 64 Bit is a fascinating, well-documented piece of technology, and working with it is highly rewarding. However, the official product does not ship with an automated setup tool or built-in scripts for fundamental database management tasks — such as starting, stopping, creating backups, or performing restores.
+GemStone/S 64 Bit is a fascinating, well-documented piece of technology, and working with it is highly rewarding. However, the official product does not ship with an automated setup tool or built-in scripts for fundamental database management tasks — such as starting, stopping, creating backups, or performing restores. If you just want to quickly set up a GemStone/S installation to experiment with, getting started can be a bit of a hurdle.
 
 The goal of `gs-cli` is to bridge this gap by making the setup process as effortless as possible.
 
@@ -19,7 +19,10 @@ The goal of `gs-cli` is to bridge this gap by making the setup process as effort
 ### Current Limitations
 * **OS & Architecture:** Currently targets **Linux x86_64** only. Platform detection for Linux on ARM or macOS is not yet supported.
 * **Golden Copy Extent:** GemStone ships with different empty extent options. The script currently defaults to the Seaside extent. To use a different one, manually change the variable `GSCLI_GOLDEN_COPY_EXTENT_NAME=extent0.seaside.dbf` inside the script.
-* **Alternative Tooling:** For a more advanced and comprehensive management suite, check out Dale Henrichs' [GsDevKit_stones](https://github.com).
+
+### Noteworthy Alternative
+
+For a more advanced and comprehensive management suite, check out Dale Henrichs' [GsDevKit_stones](https://github.com). This could be a sensible alternative to `gs-cli`.
 
 ## Installation & Setup
 
@@ -31,7 +34,7 @@ mkdir ~/my-gemstone-project
 cd ~/my-gemstone-project
 
 # Download the script and make it executable
-curl -fsSLO https://raw.githubusercontent.com/ramauers/gs-cli/HEAD/gs-cli && chmod +x gs-cli
+curl -fsSLO https://raw.githubusercontent.com/ramauers/gs-cli/HEAD/gs-cli  && chmod +x gs-cli
 ```
 
 ### Running the Installer
@@ -46,6 +49,8 @@ The script will detect the empty directory and guide you through the configurati
 1. **Select a product version:** Press `Enter` to use the recommended default version (**3.7.6**).
 2. **Name your stone:** Provide a custom name or press `Enter` for the default `gs64stone`.
 3. **Set a NetLDI port:** Specify a port or press `Enter` for the default `50377`.
+
+Depending on your internet connection, the entire process from starting the installer to a running installation usually takes less than five minutes. Get your development environment ready (I use [Jade](https://github.com/jgfoster/Jade)), start your new environment with  ./gs-cli start  and have fun.
 
 ## Directory Structure
 
